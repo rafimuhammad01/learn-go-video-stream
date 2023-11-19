@@ -3,13 +3,20 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"github.com/grafov/m3u8"
 	"io"
+	"net/http"
+
+	"github.com/grafov/m3u8"
 )
 
 type Reader interface {
 	GetMedia(ctx context.Context, path string) ([]byte, error)
+}
+
+type Uploader interface {
+	UploadMedia(ctx context.Context, file io.Reader, fileExt string) error
 }
 
 type Repository interface {
@@ -19,6 +26,7 @@ type Repository interface {
 type MediaService struct {
 	mediaReader     Reader
 	mediaRepository Repository
+	mediaUploader   Uploader
 }
 
 func (ms MediaService) GetMedia(ctx context.Context, id string) ([]byte, error) {
@@ -49,6 +57,23 @@ func (ms MediaService) GetMediaStream(ctx context.Context, path string) ([]byte,
 	return buff, nil
 }
 
+func (ms MediaService) UploadMedia(ctx context.Context, file io.Reader, ext string) error {
+	// Read the first 512 bytes
+	buffer := make([]byte, 512)
+	_, err := io.ReadFull(file, buffer)
+	if err != nil && err != io.EOF {
+		return err
+	}
+
+	// Detect the file type based on its magic number or signature
+	fileType := http.DetectContentType(buffer)
+	if !ms.isVideoFile(fileType) {
+		return errors.New("file is not video file")
+	}
+
+	return ms.mediaUploader.UploadMedia(ctx, file, ext)
+}
+
 func (ms MediaService) appendPath(ctx context.Context, r io.Reader) (m3u8.Playlist, error) {
 	p, listType, err := m3u8.DecodeFrom(r, true)
 	if err != nil {
@@ -71,8 +96,13 @@ func (ms MediaService) appendPath(ctx context.Context, r io.Reader) (m3u8.Playli
 	return p, nil
 }
 
-func NewService(mReader Reader, mRepo Repository) MediaService {
+func (ms MediaService) isVideoFile(fileType string) bool {
+	return fileType == "video/mp4" || fileType == "video/quicktime"
+}
+
+func NewService(mReader Reader, mUploader Uploader, mRepo Repository) MediaService {
 	return MediaService{
+		mediaUploader:   mUploader,
 		mediaReader:     mReader,
 		mediaRepository: mRepo,
 	}

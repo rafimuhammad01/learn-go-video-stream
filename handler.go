@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
-	"github.com/go-chi/chi/v5"
+	"io"
 	"net/http"
+	"path/filepath"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type Service interface {
 	GetMedia(ctx context.Context, id string) ([]byte, error)
 	GetMediaStream(ctx context.Context, path string) ([]byte, error)
+	UploadMedia(ctx context.Context, file io.Reader, fileName string) error
 }
 
 type Handler struct {
@@ -38,6 +42,39 @@ func (h Handler) GetStream(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "video/MP2T")
 	w.Write(b)
+}
+
+func (h Handler) UploadVideo(w http.ResponseWriter, r *http.Request) {
+	mr, err := r.MultipartReader()
+	if err != nil {
+		HandleJSON(w, JSONResponse{Error: err.Error()}, http.StatusInternalServerError)
+		return
+	}
+
+	for {
+		part, err := mr.NextPart()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			HandleJSON(w, JSONResponse{Error: err.Error()}, http.StatusInternalServerError)
+			return
+		}
+
+		if part.FileName() != "" {
+			err = h.service.UploadMedia(r.Context(), part, filepath.Ext(part.FileName()))
+			if err != nil {
+				HandleJSON(w, JSONResponse{Error: err.Error()}, http.StatusInternalServerError)
+				return
+			}
+		}
+
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	HandleJSON(w, JSONResponse{
+		Data: "success",
+	}, http.StatusOK)
 }
 
 func NewHandler(svc Service) Handler {

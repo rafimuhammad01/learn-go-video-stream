@@ -1,10 +1,11 @@
 package main
 
 import (
+	"net/http"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
-	"net/http"
 )
 
 func main() {
@@ -13,12 +14,13 @@ func main() {
 	r.Use(cors.AllowAll().Handler)
 
 	db := NewDB()
-	fr := NewFileReader()
-	svc := NewService(fr, db)
+	fr := NewFile()
+	svc := NewService(fr, fr, db)
 	h := NewHandler(svc)
 
 	r.Get("/video/{id}", h.GetVideo)
 	r.Get("/video/stream/{filename}", h.GetStream)
+	r.Post("/video/upload", h.UploadVideo)
 
 	http.ListenAndServe(":8080", r)
 }
